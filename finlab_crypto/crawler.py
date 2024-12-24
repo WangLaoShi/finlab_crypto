@@ -48,7 +48,7 @@ def minutes_of_new_data(symbol, kline_size, data, source, client):
     return old, new + timedelta(minutes=1)
 
 
-def get_all_binance(symbol, kline_size, save=True, client=Client()):
+def get_all_binance(symbol, kline_size, verbose = True,save=True, client=Client()):
     """Getting histrical price data through binance api.
 
     Original code from: https://medium.com/swlh/retrieving-full-historical-data-for-every-cryptocurrency-on-binance-bitmex-using-the-python-apis-27b47fd8137f
@@ -73,9 +73,11 @@ def get_all_binance(symbol, kline_size, save=True, client=Client()):
     delta_min = (newest_point - oldest_point).total_seconds() / 60
     available_data = math.ceil(delta_min / binsizes[kline_size])
     if oldest_point == datetime.strptime('1 Jan 2017', '%d %b %Y'):
-        print('Downloading all available %s data for %s. Be patient..!' % (kline_size, symbol))
+        if verbose:
+            print('Downloading all available %s data for %s. Be patient..!' % (kline_size, symbol))
     else:
-        print('Downloading %d minutes of new data available for %s, i.e. %d instances of %s data.' % (
+        if verbose:
+            print('Downloading %d minutes of new data available for %s, i.e. %d instances of %s data.' % (
         delta_min, symbol, available_data, kline_size))
     klines = client.get_historical_klines(symbol, kline_size, oldest_point.strftime("%d %b %Y %H:%M:%S"),
                                           newest_point.strftime("%d %b %Y %H:%M:%S"))
@@ -91,7 +93,8 @@ def get_all_binance(symbol, kline_size, save=True, client=Client()):
     data_df.set_index('timestamp', inplace=True)
     data_df = data_df[~data_df.index.duplicated(keep='last')]
     if save and os.path.exists('./history'): data_df.to_csv(filename)
-    print('All caught up..!')
+    if verbose:
+        print('All caught up..!')
     data_df.index = pd.to_datetime(data_df.index, utc=True)
     data_df = data_df[~data_df.index.duplicated(keep='last')]
     return data_df.astype(float)

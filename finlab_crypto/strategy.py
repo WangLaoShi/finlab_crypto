@@ -279,11 +279,22 @@ class Strategy(object):
         exits = exits.squeeze()
         return entries, exits
 
-    def backtest(self, ohlcv, variables=None,
-                 filters=None, lookback=None, plot=False,
-                 signals=False, side='long', cscv_nbins=10,
-                 cscv_objective=lambda r: r.mean(), html=None, compounded=True, execution_price='close',
-                 k_colors='world', **args):
+    def backtest(self,
+                 ohlcv,
+                 variables=None,
+                 filters=None,
+                 lookback=None,
+                 plot=False,
+                 pyechart_render_in_notebook=False,
+                 signals=False,
+                 side='long',
+                 cscv_nbins=10,
+                 cscv_objective=lambda r: r.mean(),
+                 html=None,
+                 compounded=True,
+                 execution_price='close',
+                 k_colors='world',
+                 **args):
 
         """Backtest analysis tool set.
         Use vectorbt as base module to create numerical operations features.
@@ -298,6 +309,8 @@ class Strategy(object):
           lookback: A int of slice that you want to get recent ohlcv.
             Default is None.
           plot: A bool of control plot display.
+            Default is False.
+          pyechart_render_in_notebook: A bool of control pyechart render in notebook.
             Default is False.
           signals: A bool of controlentries, exits, fig_data return.
             Default is False.
@@ -327,67 +340,105 @@ class Strategy(object):
             "side should be 'long' or 'short'":if side is not 'short' or 'long'.
 
         """
+        # 确保 `variables` 是一个字典，如果为 None 则默认为空字典
         variables = variables or dict()
+
+        # 确保 `filters` 是一个字典，如果为 None 则默认为空字典
         filters = filters or dict()
 
+        # 创建 `variables` 的副本，以便在不影响原始数据的情况下进行修改
         variables_without_stop = copy.copy(variables)
 
-        # sl_trail: patch for vbt updates
+        # 要从 `variables_without_stop` 中移除的停止变量列表
         exit_vars = ['sl_stop', 'ts_stop', 'tp_stop', 'sl_trail']
+
+        # 用于存储被移除的停止变量的字典
         stop_vars = {}
+
+        # 遍历停止变量列表
         for e in exit_vars:
+            # 如果停止变量在 `variables_without_stop` 中，则将其移除并添加到 `stop_vars` 中
             if e in variables_without_stop:
                 stop_vars[e] = variables[e]
                 variables_without_stop.pop(e)
 
+        # 根据提供的回溯期切片OHLCV数据，如果没有提供回溯期则使用整个数据集
         ohlcv_lookback = ohlcv.iloc[-lookback:] if lookback else ohlcv
 
+        # 枚举不包含停止条件的变量
         variable_enumerate = enumerate_variables(variables_without_stop)
 
+        # 如果没有枚举变量，则使用默认参数
         if not variable_enumerate:
             variable_enumerate = [self._default_parameters]
 
+        # 基于枚举变量生成进入和退出信号，以及图表数据
         entries, exits, fig_data = enumerate_signal(ohlcv_lookback, self, variable_enumerate)
 
+        # 如果提供了过滤器，则枚举并添加过滤器信号到进入、退出和图表数据中
         if filters:
             filter_signals = self._enumerate_filters(ohlcv_lookback, filters)
             entries, exits, fig_data = self._add_filters(entries, exits, fig_data, filter_signals)
 
+        # 根据停止变量添加提前停止条件到进入和退出信号中
         entries, exits = self._add_stops(ohlcv_lookback, entries, exits, stop_vars)
 
+        # 如果设置了信号标志，则返回进入、退出信号和图表数据
         if signals:
             return entries, exits, fig_data
 
         if side == 'long':
-
+            # 如果不使用复利计算，则设置交易规模为初始现金除以第一个收盘价
             if not compounded:
-                args['size'] = vbt.settings.portfolio['init_cash'] /  ohlcv_lookback.close[0]
+                args['size'] = vbt.settings.portfolio['init_cash'] / ohlcv_lookback.close[0]
 
+            # 确保执行价格为'close'或'open'
             assert execution_price == 'close' or execution_price == 'open'
-            price = ohlcv_lookback[execution_price] if execution_price == 'close' else ohlcv_lookback[execution_price].shift(-1).bfill()
 
+            # 根据执行价格选择价格数据，如果是'open'则向前移动一行并填充缺失值
+            price = ohlcv_lookback[execution_price] if execution_price == 'close' else ohlcv_lookback[
+                execution_price].shift(-1).bfill()
+
+            # 使用信号生成投资组合
             portfolio = vbt.Portfolio.from_signals(
-                ohlcv_lookback[execution_price], entries.fillna(False), exits.fillna(False), **args)
+                ohlcv_lookback[execution_price],
+                entries.fillna(False),
+                exits.fillna(False),
+                **args)
 
         elif side == 'short':
+            # 如果交易方向为'short'，则抛出异常
             raise Exception('Shorting is not support yet')
 
         else:
+            # 如果交易方向不是'long'或'short'，则抛出异常
             raise Exception("side should be 'long' or 'short'")
 
         if (plot or html is not None) and isinstance(entries, pd.Series):
-            plot_strategy(ohlcv_lookback, entries, exits, portfolio, fig_data, html=html, k_colors=k_colors)
+            # 如果 `plot` 为真或 `html` 不为 None，并且 `entries` 是一个 `pd.Series` 实例
+            # 使用提供的 `entries`、`exits` 和 `portfolio` 数据绘制策略
+            # 如果提供了 `html`，则以 HTML 格式渲染图表
+            # 如果 `pyechart_render_in_notebook` 为真，则在笔记本中渲染图表
+            c = plot_strategy(ohlcv_lookback, entries, exits, portfolio, fig_data, pyechart_render_in_notebook,
+                              html=html, k_colors=k_colors)
 
         elif plot and isinstance(entries, pd.DataFrame):
-
-            # perform CSCV algorithm
+            # 如果 `plot` 为真并且 `entries` 是一个 `pd.DataFrame` 实例
+            # 执行 CSCV 算法以估计过拟合
             cscv = CSCV(n_bins=cscv_nbins, objective=cscv_objective)
             cscv.add_daily_returns(portfolio.daily_returns())
             cscv_result = cscv.estimate_overfitting(plot=False)
 
-            # plot results
+            # 绘制投资组合和 CSCV 结果的组合图
             plot_combination(portfolio, cscv_result)
             plt.show()
+
+            # 可视化投资组合中的变量
             variable_visualization(portfolio)
 
-        return portfolio
+        # 如果 `pyechart_render_in_notebook` 为真，则返回 `portfolio` 和 `c`
+        if pyechart_render_in_notebook:
+            return portfolio, c
+        else:
+            # 否则，仅返回 `portfolio`
+            return portfolio

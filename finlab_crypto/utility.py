@@ -8,14 +8,12 @@ import vectorbt as vbt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-import copy
-import os
 
 from . import chart
-from . import overfitting
 
 
 def is_evalable(obj):
+    # 检查对象是否可以被 eval 函数求值
     try:
         eval(str(obj))
         return True
@@ -23,6 +21,7 @@ def is_evalable(obj):
         return False
 
 def remove_pd_object(d):
+    # 移除字典中值为 pandas 对象的项
     ret = {}
     for n, v in d.items():
         if ((not isinstance(v, pd.Series) and not isinstance(v, pd.DataFrame) and not callable(v) and is_evalable(v))
@@ -31,7 +30,7 @@ def remove_pd_object(d):
     return ret
 
 def enumerate_variables(variables):
-
+    # 枚举变量
     if not variables:
         return []
 
@@ -55,12 +54,10 @@ def enumerate_variables(variables):
 
     return variable_enumerations
 
-
-
-def enumerate_signal(ohlcv, strategy, variables, ):
+def enumerate_signal(ohlcv, strategy, variables):
+    # 枚举信号
     entries = {}
     exits = {}
-
     fig = {}
 
     iteration = tqdm.tqdm(variables) if len(variables) > 1 else variables
@@ -77,7 +74,7 @@ def enumerate_signal(ohlcv, strategy, variables, ):
     entries = pd.DataFrame(entries)
     exits = pd.DataFrame(exits)
 
-    # setup columns
+    # 设置列
     param_names = list(eval(entries.columns[0]).keys())
     arrays = ([entries.columns.map(lambda s: eval(s)[p]) for p in param_names])
     tuples = list(zip(*arrays))
@@ -88,11 +85,11 @@ def enumerate_signal(ohlcv, strategy, variables, ):
     return entries, exits, fig
 
 def stop_early(ohlcv, entries, exits, stop_vars, enumeration=True):
-
+    # 提前停止
     if not stop_vars:
         return entries, exits
 
-    # check for stop_vars
+    # 检查停止变量
     length = -1
     stop_vars_set = {'sl_stop', 'ts_stop', 'tp_stop', 'sl_trail'}
     for s, slist in stop_vars.items():
@@ -113,7 +110,7 @@ def stop_early(ohlcv, entries, exits, stop_vars, enumeration=True):
         stop_vars = enumerate_variables(stop_vars)
         stop_vars = {key: [stop_vars[i][key] for i in range(len(stop_vars))] for key in stop_vars[0].keys()}
 
-    # vbt patch: change ts_stop to sl_trail
+    # vbt 补丁: 将 ts_stop 改为 sl_trail
     if 'ts_stop' in stop_vars:
         ts_stop = stop_vars.pop('ts_stop')
         stop_vars['sl_trail'] = ts_stop
@@ -139,14 +136,20 @@ def stop_early(ohlcv, entries, exits, stop_vars, enumeration=True):
 
     return entries, stop_exits
 
-def plot_strategy(ohlcv, entries, exits, portfolio ,fig_data, html=None, k_colors='world'):
-
-    # format trade data
+def plot_strategy(ohlcv,
+                  entries,
+                  exits,
+                  portfolio,
+                  fig_data,
+                  pyechart_render_in_notebook=False,
+                  html=None,
+                  k_colors='world'):
+    # 绘制策略,使用信号生成的投资组合
     txn = portfolio.positions.records
     txn['enter_time'] = ohlcv.iloc[txn.entry_idx].index.values
     txn['exit_time'] = ohlcv.iloc[txn.exit_idx].index.values
 
-    # plot trade data
+    # 绘制交易数据
     mark_lines = []
     for name, t in txn.iterrows():
         x = [str(t.enter_time), str(t.exit_time)]
@@ -154,37 +157,42 @@ def plot_strategy(ohlcv, entries, exits, portfolio ,fig_data, html=None, k_color
         name = t.loc[['entry_price', 'exit_price', 'return']].to_string()
         mark_lines.append((name, x, y))
 
-    # calculate overlap figures
+    # 计算重叠图形
     overlaps = {}
     if 'overlaps' in fig_data:
         overlaps = fig_data['overlaps']
 
-    # calculate sub-figures
+    # 计算子图形
     figures = {}
     if 'figures' in fig_data:
         figures = fig_data['figures']
 
     figures['entries & exits'] = pd.DataFrame(
-        {'entries':entries.squeeze(), 'exits': exits.squeeze()})
+        {'entries': entries.squeeze(), 'exits': exits.squeeze()})
     figures['performance'] = portfolio.cumulative_returns()
 
     c, info = chart.chart(ohlcv, overlaps=overlaps,
                           figures=figures, markerlines=mark_lines,
                           start_date=ohlcv.index[-min(1000, len(ohlcv))], end_date=ohlcv.index[-1], k_colors=k_colors)
     c.load_javascript()
-    if html is not None:
-        c.render(html)
 
-    c.render('render.html')
+    print("pyechart_render_in_notebook: ", pyechart_render_in_notebook)
+    # 渲染图表
+    if pyechart_render_in_notebook:
+        c.render_notebook()
+    else:
+        if html is not None:
+            c.render(html)
 
-    from IPython.display import HTML, display
-    display(HTML('render.html'))
-        #display(HTML(filename='render.html'))
+        c.render('render.html')
+
+        from IPython.display import HTML, display
+        display(HTML('render.html'))
 
     return c
 
 def plot_combination(portfolio, cscv_result=None, metric='final_value'):
-
+    # 绘制组合图
     sns.set()
     sns.set_style("whitegrid")
 
@@ -210,11 +218,9 @@ def plot_combination(portfolio, cscv_result=None, metric='final_value'):
         bests = best_n(portfolio, n)
         drawdown = portfolio.drawdown()[bests].min(axis=1)
         ax = drawdown.plot(linewidth=1, ax=axes[1])
-        # ax.fill_between(drawdown.index, 0, drawdown * 100, alpha=0.2, color=c)
     ax.set(xlabel='time', ylabel='drawdown (%)')
 
     plt.show()
-
 
     items = ['final_value', 'sharpe_ratio', 'sortino_ratio']
     fig, axes = plt.subplots(1, len(items), figsize=(15, 3),
@@ -258,24 +264,19 @@ def plot_combination(portfolio, cscv_result=None, metric='final_value'):
     axes[0].set_xlabel('Logits')
     axes[0].set_ylabel('Frequency')
 
-    # performance degradation
     axes[1].title.set_text('Performance degradation')
     x, y = pd.DataFrame([results['R_n_star'], results['R_bar_n_star']]).dropna(axis=1).values
     sns.regplot(x=x, y=y, ax=axes[1])
-    #axes[1].set_xlim(min(results['R_n_star']) * 1.2,max(results['R_n_star']) * 1.2)
-    #axes[1].set_ylim(min(results['R_bar_n_star']) * 1.2,max(results['R_bar_n_star']) * 1.2)
     axes[1].set_xlabel('In-sample Performance')
     axes[1].set_ylabel('Out-of-sample Performance')
 
-    # first and second Stochastic dominance
     axes[2].title.set_text('Stochastic dominance')
     if len(results['dom_df']) != 0: results['dom_df'].plot(ax=axes[2], secondary_y=['SD2'])
     axes[2].set_xlabel('Performance optimized vs non-optimized')
     axes[2].set_ylabel('Frequency')
 
-
 def variable_visualization(portfolio):
-
+    # 变量可视化
     param_names = portfolio.cumulative_returns().columns.names
     dropdown1 = widgets.Dropdown(
         options=param_names,
@@ -310,7 +311,6 @@ def variable_visualization(portfolio):
         performance = performance_dropdwon.value
 
         with out:
-            # out.clear_output()
             if name1 != name2:
                 df = (getattr(portfolio, performance)()
                       .reset_index().groupby([name1, name2]).mean()[performance]
@@ -322,7 +322,6 @@ def variable_visualization(portfolio):
                 getattr(portfolio, performance)().groupby(name1).mean().plot()
 
             plt.show()
-
 
     dropdown1.observe(update, 'value')
     dropdown2.observe(update, 'value')

@@ -1,6 +1,3 @@
-import talib
-import numpy as np
-import pandas as pd
 from finlab_crypto.strategy import Strategy
 
 @Strategy(window=14, nstd=2)
